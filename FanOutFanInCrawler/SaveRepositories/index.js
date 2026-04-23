@@ -1,39 +1,64 @@
-const df = require('durable-functions')
-var storage = require('azure-storage')
+// SaveRepositories activity — persists repo issue counts to Azure Table Storage.
+//
+// Cloud deployments use a managed identity (no shared keys) and set:
+//   AzureWebJobsStorage__tableServiceUri  -> https://<account>.table.core.windows.net
+//   AzureWebJobsStorage__credential       -> "managedidentity"
+//   AzureWebJobsStorage__clientId         -> <user-assigned MI client id>
+// Local dev sets `AzureWebJobsStorage` to a connection string (e.g. UseDevelopmentStorage=true)
+// or `StorageConnectionString` for an explicit override.
+const { TableClient } = require('@azure/data-tables');
+const { DefaultAzureCredential } = require('@azure/identity');
+
+function createTableClient(tableName) {
+  const explicitConn = process.env.StorageConnectionString;
+  if (explicitConn) {
+    return TableClient.fromConnectionString(explicitConn, tableName);
+  }
+
+  const tableUri = process.env.AzureWebJobsStorage__tableServiceUri;
+  if (tableUri) {
+    const clientId = process.env.AzureWebJobsStorage__clientId;
+    const credential = clientId
+      ? new DefaultAzureCredential({ managedIdentityClientId: clientId })
+      : new DefaultAzureCredential();
+    return new TableClient(tableUri, tableName, credential);
+  }
+
+  const awjs = process.env.AzureWebJobsStorage;
+  if (awjs) {
+    return TableClient.fromConnectionString(awjs, tableName);
+  }
+
+  throw new Error(
+    "No storage configured. Set 'AzureWebJobsStorage__tableServiceUri' (managed identity, cloud) " +
+    "or 'AzureWebJobsStorage'/'StorageConnectionString' (connection string, local)."
+  );
+}
 
 module.exports = async (context) => {
-  // `input` here is retrieved from the Orchestrator function `callActivity` input parameter
-  var input = context.bindings.input;
-  
-  // create the table service for Blob Storage
-  var tableService = storage.createTableService(
-    process.env['AzureWebJobsStorage']
-  )
+  const input = context.bindings.input;
+  const tableClient = createTableClient('Repositories');
 
-  // create the table if it doesn't exist already.
-  tableService.createTableIfNotExists('Repositories', error => {
-    if (error) {
-      console.error(error)
-      return
-    }
-    // creates a batch of operation to be executed
-    var batch = new storage.TableBatch()
-    for (var i = 0; i < input.length; i++) {
-      var repository = input[i]
+  await tableClient.createTable();
 
-      // Creates an operation to add the repository to Table Storage
-      batch.insertOrReplaceEntity({
-        PartitionKey: { _: 'Default' },
-        RowKey: { _: repository.id.toString() },
-        OpenedIssues: { _: repository.openedIssues },
-        RepositoryName: { _: repository.name }
-      })
+  // Table Storage transactional batches must share a partition key and stay <= 100 entities.
+  const partitionKey = 'Default';
+  for (let i = 0; i < input.length; i += 100) {
+    const chunk = input.slice(i, i + 100);
+    const actions = chunk.map((repo) => [
+      'upsert',
+      {
+        partitionKey,
+        rowKey: String(repo.id),
+        OpenedIssues: repo.openedIssues,
+        RepositoryName: repo.name,
+      },
+      'Merge',
+    ]);
+    if (actions.length > 0) {
+      await tableClient.submitTransaction(actions);
     }
-    // execute the batch of operations
-    tableService.executeBatch('Repositories', batch, error => {
-      if (error) {
-        console.error(error)
-      }
-    })
-  })
-}
+  }
+
+  context.log(`Saved ${input.length} repositories to Table Storage.`);
+};
