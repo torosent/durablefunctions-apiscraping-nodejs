@@ -79,7 +79,7 @@ azd up
 
 `azd up` will prompt for an environment name, target subscription, and Azure region (default `northcentralus`). After deploy, you can view orchestration runs in the DTS dashboard — find your scheduler endpoint with `azd show` and open `https://dashboard.durabletask.io`.
 
-> Note: DTS is in preview. The `host.json` in this sample pins the `Microsoft.Azure.Functions.ExtensionBundle.Preview` bundle (`[4.*, 5.0.0)`), which provides the `azureManaged` storage provider.
+> Note: The `host.json` in this sample pins the standard `Microsoft.Azure.Functions.ExtensionBundle` (`[4.*, 5.0.0)`), which provides the `azureManaged` storage provider for the Durable Task Scheduler backend.
 
 ## Contribute
 
