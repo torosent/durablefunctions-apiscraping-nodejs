@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+
+name: durablefunctions-apiscraping-nodejs
+metadata:
+  template: durablefunctions-apiscraping-nodejs@1.0.0
+services:
+  api:
+    project: ./FanOutFanInCrawler
+    language: js
+    host: function

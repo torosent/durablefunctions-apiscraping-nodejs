@@ -9,7 +9,7 @@ languages:
   - nodejs
 name: "Retrieve opened issue count on GitHub with Azure Durable Functions (Node)"
 urlFragment: retrieve-opened-issue-count-on-github-with-azure-durable-functions
-description: "Build an Azure Durable Functions that will scrape GitHub for opened issues and store them on Azure Storage."
+description: "Build an Azure Durable Functions sample that scrapes GitHub for opened issues, using Azure Durable Task Scheduler (DTS) as the orchestration backend."
 extensions:
   ms.author: marouill
   ms.custom: nextgen
@@ -35,7 +35,10 @@ More [installation options](https://docs.microsoft.com/en-us/azure/azure-functio
 
 - GitHub Personal Access Token
   - [How to create a Personal Access Token](https://help.github.com/articles/creating-a-personal-access-token-for-the-command-line/)
-- [Azure Functions Tooling](https://docs.microsoft.com/en-us/azure/azure-functions/functions-run-local?WT.mc_id=durablejs-sample-marouill)
+- [Azure Functions Core Tools v4](https://docs.microsoft.com/en-us/azure/azure-functions/functions-run-local?WT.mc_id=durablejs-sample-marouill)
+- Node.js 20+
+- [Docker](https://www.docker.com/) (for running the DTS emulator locally)
+- [Azure Developer CLI (`azd`)](https://learn.microsoft.com/azure/developer/azure-developer-cli/install-azd) (for deploying to Azure)
 - [Visual Studio Code](https://code.visualstudio.com/download?WT.mc_id=durablejs-sample-marouill) (optional)
   - [Azure Functions Extension](https://marketplace.visualstudio.com/items?itemName=ms-azuretools.vscode-azurefunctions) for debugging
 - Azure Subscription (if running on Azure)
@@ -43,34 +46,40 @@ More [installation options](https://docs.microsoft.com/en-us/azure/azure-functio
 
 ### Locally
 
-Change the `GitHubToken` value in `local.settings.json` to match your GitHub Personal Access Token created previously in the pre-requisite.
+This sample now uses **Azure Durable Task Scheduler (DTS)** as the orchestration backend. For local development, use the DTS emulator.
 
-To ensure that everything is configured properly run the following commands within the `FanOutFanInCrawler` folder.
+1. Start the DTS emulator (requires Docker):
 
-```bash
-func extensions install
-npm install
-```
+   ```bash
+   docker run -p 8080:8080 -p 8082:8082 mcr.microsoft.com/dts/dts-emulator:latest
+   ```
 
-Once the dependencies has been installed, you can either run it from VS Code by running `code .` and hitting F5 on your keyboard. If you want to run it from the command line, you can run it with the following command within the `FanOutFanInCrawler` folder.
+   The emulator exposes the DTS endpoint on `http://localhost:8080` and a dashboard on `http://localhost:8082`.
 
-```bash
-func host start
-```
+2. Copy `FanOutFanInCrawler/local.settings.json.sample` to `FanOutFanInCrawler/local.settings.json` and set `GitHubToken` to your GitHub Personal Access Token. The sample file already points `DURABLE_TASK_SCHEDULER_CONNECTION_STRING` at the local emulator and sets `TASKHUB_NAME=default`.
+
+3. Install dependencies and run the Function app:
+
+   ```bash
+   cd FanOutFanInCrawler
+   npm install
+   func start
+   ```
+
+4. Trigger the orchestration via the HTTP starter and watch the run reach `Completed` in the emulator dashboard at `http://localhost:8082`.
 
 ### On Azure
 
-To deploy components on Azure you will require to [install](https://docs.microsoft.com/cli/azure/install-azure-cli?view=azure-cli-latest&WT.mc_id=durablejs-sample-marouill) and [login](https://docs.microsoft.com/cli/azure/authenticate-azure-cli?view=azure-cli-latest&WT.mc_id=durablejs-sample-marouill) with the Azure CLI.
+Deployment is handled by the [Azure Developer CLI (`azd`)](https://learn.microsoft.com/azure/developer/azure-developer-cli/). The `infra/` Bicep provisions a Flex Consumption Function app, a user-assigned managed identity, Log Analytics + Application Insights, a storage account (blob-only, for host state), and a `Microsoft.DurableTask/schedulers` resource with a task hub. The function app is granted the **Durable Task Data Contributor** role on the scheduler via the UAMI.
 
-First, you will need to provision the service. Look into the `provision.ps1` file provided to familiarize yourself with the resources we are going to create.
-
-Then you can execute the file with the previously generated GitHub.
-
-```powershell
-.\provision.ps1 -githubToken <TOKEN> -resourceGroup <ResourceGroupName> -storageName <StorageAccountName> -functionName <FunctionName>
+```bash
+azd auth login
+azd up
 ```
 
-If you do not have PowerShell installed, you can simply take the commands within the file and run it manually.
+`azd up` will prompt for an environment name, target subscription, and Azure region (default `northcentralus`). After deploy, you can view orchestration runs in the DTS dashboard — find your scheduler endpoint with `azd show` and open `https://dashboard.durabletask.io`.
+
+> Note: DTS is in preview. The `host.json` in this sample pins the `Microsoft.Azure.Functions.ExtensionBundle.Preview` bundle (`[4.*, 5.0.0)`), which provides the `azureManaged` storage provider.
 
 ## Contribute
 
